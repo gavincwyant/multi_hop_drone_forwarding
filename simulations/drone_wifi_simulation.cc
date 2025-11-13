@@ -6,6 +6,7 @@
 #include "ns3/applications-module.h"
 #include "ns3/ssid.h"
 #include "ns3/config-store-module.h"
+#include "ns3/simulator.h"
 #include "ns3/log.h"
 
 using namespace ns3;
@@ -22,39 +23,14 @@ Ptr<Node> g_ap;
 void TxTrace(Ptr<const Packet> p) { g_txPackets++; }
 void RxTrace(Ptr<const Packet> p, const Address &) { g_rxPackets++; }
 
+// Monitor definition
+void Monitor(Ptr<WifiPhy>, Time);
 
-// rssi calculation function
-double rssiCalc(Ptr<WifiPhy> phy, Ptr<MobilityModel> mobility1, Ptr<MobilityModel> mobility2, double distance) 
-{
-  // RSSI = P - 10a*log(d/d0) + Xg
-
-  double txPowerDbm = phy->GetTxPowerStart(); // in dBm
-
-  double pathLossExponent = 3.0; // typical urban area
-
-  double originDistance = 1.0; // reference distance in meters
-
-  // in dB, random value between 5 and 9 dB
-  Ptr<UniformRandomVariable> rand = CreateObject<UniformRandomVariable>();
-
-  double minNoise = 5.0; // in dB
-  double maxNoise = 9.0;
-
-  rand->SetAttribute("Min", DoubleValue(minNoise));
-  rand->SetAttribute("Max", DoubleValue(maxNoise));
-
-  double noise = rand->GetValue(); // in dB
-
-  double rssi = txPowerDbm - 10 * pathLossExponent * std::log10(distance / originDistance) + noise;
-
-  //NS_LOG_UNCOND("Time: " << Simulator::Now().GetSeconds() << "s, Distance: " << distance << "m, RSSI: " << rssi << " dBm" << std::endl);
-
-  return rssi;
-
-}
+// rssiCalc definition
+double rssiCalc(Ptr<WifiPhy>, Ptr<MobilityModel>, Ptr<MobilityModel>, double);
 
 // Periodically print network stats
-void Monitor(Time interval)
+void Monitor(Ptr<WifiPhy> phy, Time interval)
 {
   Ptr<MobilityModel> userMob = g_user->GetObject<MobilityModel>();
   Ptr<MobilityModel> apMob = g_ap->GetObject<MobilityModel>();
@@ -64,17 +40,18 @@ void Monitor(Time interval)
   if (g_txPackets > 0)
     lossRate = 100.0 * (1.0 - (double)g_rxPackets / g_txPackets);
 
-  //double rssi_value = rssiCalc(phy, userMob, apMob, distance);
+  double rssi_value = rssiCalc(phy, userMob, apMob, distance);
 
   // Print timestamp, distance, and loss
   std::cout << Simulator::Now().GetSeconds() << "s: "
             << "Distance=" << distance << "m, "
             << "Tx=" << g_txPackets << ", Rx=" << g_rxPackets
-            << " (" << lossRate << "% loss)"
+            << " (" << lossRate << "% loss), "
+            << "RSSI Value= " << rssi_value << " "
             << std::endl;
 
   // Schedule next check
-  Simulator::Schedule(interval, &Monitor, interval);
+  Simulator::Schedule(interval, &Monitor, phy, interval);
 }
 
 int main(int argc, char *argv[])
@@ -141,7 +118,7 @@ int main(int argc, char *argv[])
 
   ApplicationContainer clientApps = echoClient.Install(user.Get(0));
   clientApps.Start(Seconds(2.0));
-  clientApps.Stop(Seconds(20.0));
+  clientApps.Stop(Seconds(60.0));
 
   // Connect traces for packet tracking
   Ptr<UdpEchoClient> clientApp = DynamicCast<UdpEchoClient>(clientApps.Get(0));
@@ -154,12 +131,41 @@ int main(int argc, char *argv[])
   Ptr<WifiPhy> phyPtr = wifiDevice->GetPhy();
 
   // Start periodic monitoring
-  Simulator::Schedule(Seconds(2.0), &Monitor, Seconds(2.0));
+  Simulator::Schedule(Seconds(2.0), &Monitor, phyPtr, Seconds(2.0));
 
   phy.EnablePcapAll("drone_wifi_simulation");
 
-  Simulator::Stop(Seconds(20.0));
+  Simulator::Stop(Seconds(60.0));
   Simulator::Run();
   Simulator::Destroy();
   return 0;
+}
+
+double rssiCalc(Ptr<WifiPhy> phy, Ptr<MobilityModel> mobility1, Ptr<MobilityModel> mobility2, double distance) 
+{
+  // RSSI = P - 10a*log(d/d0) + Xg
+
+  double txPowerDbm = phy->GetTxPowerStart(); // in dBm
+
+  double pathLossExponent = 3.0; // typical urban area
+
+  double originDistance = 1.0; // reference distance in meters
+
+  // in dB, random value between 5 and 9 dB
+  Ptr<UniformRandomVariable> rand = CreateObject<UniformRandomVariable>();
+
+  double minNoise = 5.0; // in dB
+  double maxNoise = 9.0;
+
+  rand->SetAttribute("Min", DoubleValue(minNoise));
+  rand->SetAttribute("Max", DoubleValue(maxNoise));
+
+  double noise = rand->GetValue(); // in dB
+
+  double rssi = txPowerDbm - 10 * pathLossExponent * std::log10(distance / originDistance) + noise;
+
+  //NS_LOG_UNCOND("Time: " << Simulator::Now().GetSeconds() << "s, Distance: " << distance << "m, RSSI: " << rssi << " dBm" << std::endl);
+
+  return rssi;
+
 }
