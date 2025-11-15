@@ -8,6 +8,7 @@
 #include "ns3/config-store-module.h"
 #include "ns3/simulator.h"
 #include "ns3/log.h"
+#include <map>
 
 using namespace ns3;
 
@@ -19,9 +20,43 @@ uint64_t g_rxPackets = 0;
 Ptr<Node> g_user;
 Ptr<Node> g_ap;
 
+// RTT tracking
+std::map<uint32_t, Time> g_sentTimes;
+double g_lastRtt = 0.0;
+uint64_t g_rttSamples = 0;
+double g_avgRtt = 0.0;
+
 // Collect packet Tx/Rx stats
-void TxTrace(Ptr<const Packet> p) { g_txPackets++; }
-void RxTrace(Ptr<const Packet> p, const Address &) { g_rxPackets++; }
+void TxTrace(Ptr<const Packet> p)
+{
+  g_txPackets++;
+  // Store send time for RTT calculation
+  g_sentTimes[p->GetUid()] = Simulator::Now();
+}
+
+void RxTrace(Ptr<const Packet> p, const Address &)
+{
+  g_rxPackets++;
+}
+
+// Client receives echo response
+void ClientRxTrace(Ptr<const Packet> p)
+{
+  uint32_t uid = p->GetUid();
+  auto it = g_sentTimes.find(uid);
+
+  if (it != g_sentTimes.end())
+  {
+    Time rtt = Simulator::Now() - it->second;
+    g_lastRtt = rtt.GetMilliSeconds();
+
+    // Calculate running average
+    g_rttSamples++;
+    g_avgRtt = g_avgRtt + (g_lastRtt - g_avgRtt) / g_rttSamples;
+
+    g_sentTimes.erase(it);
+  }
+}
 
 // Monitor definition
 void Monitor(Ptr<WifiPhy>, Time);
@@ -47,7 +82,8 @@ void Monitor(Ptr<WifiPhy> phy, Time interval)
             << "Distance=" << distance << "m, "
             << "Tx=" << g_txPackets << ", Rx=" << g_rxPackets
             << " (" << lossRate << "% loss), "
-            << "RSSI Value= " << rssi_value << " "
+            << "RSSI Value= " << rssi_value << ", "
+            << "RTT= " << g_avgRtt << "ms"
             << std::endl;
 
   // Schedule next check
@@ -126,6 +162,7 @@ int main(int argc, char *argv[])
 
   clientApp->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
   serverApp->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
+  clientApp->TraceConnectWithoutContext("Rx", MakeCallback(&ClientRxTrace));
 
   Ptr<WifiNetDevice> wifiDevice = DynamicCast<WifiNetDevice>(apDevice.Get(0));
   Ptr<WifiPhy> phyPtr = wifiDevice->GetPhy();
@@ -141,7 +178,7 @@ int main(int argc, char *argv[])
   return 0;
 }
 
-double rssiCalc(Ptr<WifiPhy> phy, Ptr<MobilityModel> mobility1, Ptr<MobilityModel> mobility2, double distance) 
+double rssiCalc(Ptr<WifiPhy> phy, Ptr<MobilityModel> mobility1, Ptr<MobilityModel> mobility2, double distance)
 {
   // RSSI = P - 10a*log(d/d0) + Xg
 
