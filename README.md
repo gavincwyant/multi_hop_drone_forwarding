@@ -26,3 +26,5 @@ In order to use the current build script (run_sim.sh), the following directory s
 └── ns-3-dev
 
 ```
+
+### RSSI Implementation

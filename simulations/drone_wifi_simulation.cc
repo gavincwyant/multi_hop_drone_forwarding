@@ -199,7 +199,7 @@ double rssiCalc(Ptr<WifiPhy> phy, Ptr<MobilityModel> mobility1, Ptr<MobilityMode
 
   double noise = rand->GetValue(); // in dB
 
-  double rssi = txPowerDbm - 10 * pathLossExponent * std::log10(distance / originDistance) + noise;
+  double rssi = txPowerDbm - 10 * pathLossExponent * std::log2(distance / originDistance) + noise;
 
   //NS_LOG_UNCOND("Time: " << Simulator::Now().GetSeconds() << "s, Distance: " << distance << "m, RSSI: " << rssi << " dBm" << std::endl);
 
