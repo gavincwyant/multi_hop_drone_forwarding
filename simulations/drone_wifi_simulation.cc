@@ -7,6 +7,9 @@
 #include "ns3/ssid.h"
 #include "ns3/config-store-module.h"
 #include "ns3/simulator.h"
+#include "ns3/building.h"
+#include "ns3/building-container.h"
+#include "ns3/buildings-module.h"
 #include "ns3/log.h"
 #include <map>
 
@@ -131,6 +134,21 @@ int main(int argc, char *argv[])
   user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(Vector(5.0, 0.0, 0.0)); // 5 m/s away from spawn
 
   baseStation.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.0));
+
+  // add buildings here
+  // may use grid allocation for multiple similar buildings
+  BuildingContainer buildings;
+  Ptr<Building> building1 = CreateObject<Building>();
+  building1->SetBoundaries(Box(10.0, 20.0, 0.0, 30.0, 10.0, 30.0));  
+  building1->SetBuildingType(Building::Residential);
+  building1->SetNFloors(2);
+  building1->SetNRoomsX(2); 
+  building1->SetNRoomsY(2);
+  building1->SetExtWallsType(Building::ExtWallsType_t::ConcreteWithWindows);
+
+  buildings.Add(building1);
+
+  BuildingsHelper::Install(user);
 
   InternetStackHelper stack;
   stack.Install(user);
