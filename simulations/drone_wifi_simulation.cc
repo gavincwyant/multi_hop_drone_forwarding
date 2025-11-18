@@ -10,6 +10,8 @@
 #include "ns3/building.h"
 #include "ns3/building-container.h"
 #include "ns3/buildings-module.h"
+#include "ns3/hybrid-buildings-propagation-loss-model.h"
+#include "ns3/mobility-building-info.h"
 #include "ns3/log.h"
 #include <map>
 
@@ -87,6 +89,7 @@ void Monitor(Ptr<WifiPhy> phy, Time interval)
             << " (" << lossRate << "% loss), "
             << "RSSI Value= " << rssi_value << ", "
             << "RTT= " << g_avgRtt << "ms"
+//            << "Initial Tx Power= " << phy->GetTxPowerStart() << " dBm"
             << std::endl;
 
   // Schedule next check
@@ -130,13 +133,17 @@ int main(int argc, char *argv[])
   mobility.Install(user);
   mobility.Install(baseStation);
 
-  user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.0));
+  user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetPosition(Vector(1.0, 0.0, 0.0));
   user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(Vector(5.0, 0.0, 0.0)); // 5 m/s away from spawn
 
   baseStation.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.0));
 
   // add buildings here
-  // may use grid allocation for multiple similar buildings
+  // hybrid propagation loss model, waiting for feedback from Gavin our networks guru
+
+
+
+  /* add one building
   BuildingContainer buildings;
   Ptr<Building> building1 = CreateObject<Building>();
   building1->SetBoundaries(Box(10.0, 20.0, 0.0, 30.0, 10.0, 30.0));  
@@ -149,6 +156,7 @@ int main(int argc, char *argv[])
   buildings.Add(building1);
 
   BuildingsHelper::Install(user);
+  */
 
   InternetStackHelper stack;
   stack.Install(user);
@@ -184,7 +192,6 @@ int main(int argc, char *argv[])
 
   Ptr<WifiNetDevice> wifiDevice = DynamicCast<WifiNetDevice>(apDevice.Get(0));
   Ptr<WifiPhy> phyPtr = wifiDevice->GetPhy();
-
   // Start periodic monitoring
   Simulator::Schedule(Seconds(2.0), &Monitor, phyPtr, Seconds(2.0));
 
@@ -200,7 +207,7 @@ double rssiCalc(Ptr<WifiPhy> phy, Ptr<MobilityModel> mobility1, Ptr<MobilityMode
 {
   // RSSI = P - 10a*log(d/d0) + Xg
 
-  double txPowerDbm = phy->GetTxPowerStart(); // in dBm
+  double Px = 0.05; // in dBm
 
   double pathLossExponent = 3.0; // typical urban area
 
@@ -217,7 +224,7 @@ double rssiCalc(Ptr<WifiPhy> phy, Ptr<MobilityModel> mobility1, Ptr<MobilityMode
 
   double noise = rand->GetValue(); // in dB
 
-  double rssi = txPowerDbm - 10 * pathLossExponent * std::log2(distance / originDistance) + noise;
+  double rssi = Px - 10 * pathLossExponent * std::log10(distance / originDistance) - noise;
 
   //NS_LOG_UNCOND("Time: " << Simulator::Now().GetSeconds() << "s, Distance: " << distance << "m, RSSI: " << rssi << " dBm" << std::endl);
 
