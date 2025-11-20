@@ -10,9 +10,9 @@ if [ ! -d "$NS3_PATH" ]; then
 fi
 
 # Copy your simulation into ns-3 scratch/
-cp simulations/drone_wifi_simulation.cc "$NS3_PATH/scratch/"
+cp hybridbuildings_example/buildings.cc "$NS3_PATH/scratch/"
 
 # Build and run the simulation
 cd "$NS3_PATH"
 ./ns3 build
-./ns3 run scratch/drone_wifi_simulation
+./ns3 run scratch/buildings
