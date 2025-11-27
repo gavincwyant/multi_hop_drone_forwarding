@@ -26,19 +26,19 @@ int main(int argc, char *argv[]) {
   LogComponentEnable("BuildingsExample", LOG_LEVEL_INFO);
 
   Ptr<GridBuildingAllocator>  gridBuildingAllocator;
-  gridBuildingAllocator = CreateObject<GridBuildingAllocator>();
+  gridBuildingAllocator = CreateObject<GridBuildingAllocator>(); // create a grid of 7 x 13 x 6 buildings
   gridBuildingAllocator->SetAttribute("GridWidth", UintegerValue(3));
   gridBuildingAllocator->SetAttribute("LengthX", DoubleValue(7));
   gridBuildingAllocator->SetAttribute("LengthY", DoubleValue(13));
   gridBuildingAllocator->SetAttribute("DeltaX", DoubleValue(3)); // spacing between the buildings
   gridBuildingAllocator->SetAttribute("DeltaY", DoubleValue(3));
   gridBuildingAllocator->SetAttribute("Height", DoubleValue(6));
-  gridBuildingAllocator->SetBuildingAttribute("NRoomsX", UintegerValue(2));
+  gridBuildingAllocator->SetBuildingAttribute("NRoomsX", UintegerValue(2)); // each building has 2 x 4 rooms
   gridBuildingAllocator->SetBuildingAttribute("NRoomsY", UintegerValue(4));
-  gridBuildingAllocator->SetBuildingAttribute("NFloors", UintegerValue(2));
+  gridBuildingAllocator->SetBuildingAttribute("NFloors", UintegerValue(2)); // each building has 2 floors
   gridBuildingAllocator->SetAttribute("MinX", DoubleValue(0));
   gridBuildingAllocator->SetAttribute("MinY", DoubleValue(0));
-  gridBuildingAllocator->Create(6);
+  gridBuildingAllocator->Create(6); // create 6 buildings
 
   MobilityHelper mobility;
   mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
