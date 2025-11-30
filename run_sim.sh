@@ -4,7 +4,7 @@ set -e
 # Path to your local ns-3 clone
 NS3_PATH="../ns-3-dev"
 
-FILE="drone_sim2.cc"
+FILE="multi_hop_drone_sim.cc"
 
 if [ ! -d "$NS3_PATH" ]; then
   echo "Error: ns-3-dev not found at $NS3_PATH"

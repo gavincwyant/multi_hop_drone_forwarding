@@ -43,7 +43,7 @@ double g_lastRtt = 0.0;
 uint64_t g_rttSamples = 0;
 double g_avgRtt = 0.0;
 
-uint32_t g_numDrones = 3;
+uint32_t g_numDrones = 2;
 std::string g_droneInitMode = "deploy"; // even | cluster | deploy
 double base_station_x = 0.0;
 double g_totalDistance = 0.0;
@@ -52,7 +52,7 @@ double g_moveSpeed = 3.0;           // m/s for drone adjustments
 double g_rssiMoveThresholdDb = 3.0; // dB to prefer movement
 Time   g_balanceInterval = Seconds(1.0);
 Time   g_monitorInterval = Seconds(2.0);
-double USER_DEFAULT_SPEED = 5.0;
+double USER_DEFAULT_SPEED = 2.5;
 double g_userSpeed = USER_DEFAULT_SPEED;
 
 // How many meters per ASCII column
@@ -135,44 +135,43 @@ double rssiCalcFromDistance(double distance)
     return rssi;
 }
 
-
-// ----- ASCII visualization -----
+// ----- ASCII visualization (sorted by X) -----
 void PrintAsciiMap()
 {
-    // Gather X positions and labels
     uint32_t N = allNodes.GetN();
     std::vector<std::pair<double, std::string>> ents;
     ents.reserve(N);
     double minX = 1e9, maxX = -1e9;
+
     for (uint32_t i = 0; i < N; ++i)
     {
         Vector p = allNodes.Get(i)->GetObject<MobilityModel>()->GetPosition();
         std::string label;
-        if (i == 0) label = "U";                             // user
-        else if (i == N-1) label = "A";                      // AP
-        else
-        {
-            std::ostringstream ss; ss << "D" << i;           // drones indexed by node index
+        if (i == 0) label = "U";          // user
+        else if (i == N-1) label = "A";   // AP
+        else {
+            std::ostringstream ss; ss << "D" << i; // drones indexed by node index
             label = ss.str();
         }
         ents.emplace_back(p.x, label);
         if (p.x < minX) minX = p.x;
         if (p.x > maxX) maxX = p.x;
     }
-    /*
-    // Expand bounds a bit for nicer view
-    double pad = g_asciiStep * 2;
-    minX -= pad;
-    maxX += pad;
-    */
+
     if (maxX - minX < g_asciiStep) maxX = minX + g_asciiStep;
 
+    // Sort by X so display matches physical order
+    std::sort(ents.begin(), ents.end(),
+              [](const std::pair<double,std::string>& a, const std::pair<double,std::string>& b) {
+                  return a.first < b.first;
+              });
+
     uint32_t cols = static_cast<uint32_t>(std::ceil((maxX - minX) / g_asciiStep));
-    if (cols < 10) cols = 10; // minimum width
+    if (cols < 10) cols = 10;
 
     std::vector<std::string> row(cols, std::string("-"));
 
-    // place entities, if conflicts pick last one
+    // place entities; if conflict, later (rightmost in space-sorted order) wins
     for (auto &e : ents)
     {
         uint32_t idx = static_cast<uint32_t>(std::floor((e.first - minX) / g_asciiStep));
@@ -180,12 +179,11 @@ void PrintAsciiMap()
         row[idx] = e.second;
     }
 
-    // print line and ruler
     std::ostringstream line;
     for (uint32_t c = 0; c < cols; ++c) line << std::setw(4) << row[c];
     NS_LOG_UNCOND("\n[ASCII] " << line.str());
 
-    // print positions under map roughly
+    // print positions under map
     std::ostringstream ruler;
     for (uint32_t c = 0; c < cols; ++c)
     {
@@ -198,78 +196,6 @@ void PrintAsciiMap()
     NS_LOG_UNCOND("[POS]   " << ruler.str());
     NS_LOG_UNCOND("");
 }
-/*
-// ----- Dynamic deploy: move next staged drone into chain -----
-// Simple policy: deploy drones in order 1..N when threshold conditions met.
-// Deploy: move the next drone to an initial chain position (evenly spaced among remaining)
-void DeployNextDroneIfNeeded()
-{
-    // compute current metrics
-    double lossRate = 0.0;
-    if (l_txPackets > 0) lossRate = 100.0 * (1.0 - (double)l_rxPackets / l_txPackets);
-
-    double rtt = g_avgRtt;
-    // compute direct user->ap distance and rssi
-    Ptr<MobilityModel> userMob = allNodes.Get(0)->GetObject<MobilityModel>();
-    Ptr<MobilityModel> apMob = allNodes.Get(allNodes.GetN()-1)->GetObject<MobilityModel>();
-    double directDist = userMob->GetDistanceFrom(apMob);
-    double directRssi = rssiCalcFromDistance(directDist);
-
-    bool poor = (lossRate > g_lossDeployThresholdPct) || (rtt > g_rttDeployThresholdMs) || (directRssi < g_rssiDeployThresholdDb);
-
-    // find first non-deployed drone index (node index)
-    int nextIndex = -1;
-    for (uint32_t i = 1; i <= g_numDrones; ++i)
-    {
-        if (!droneDeployed[i-1]) { nextIndex = i; break; }
-    }
-    if (!poor || nextIndex == -1) return;
-
-    // Choose a target X for this drone: evenly space among (user + already deployed drones + ap)
-    // Count how many nodes currently active in chain: 0 => only user & ap
-    std::vector<double> activeXs;
-    activeXs.push_back(allNodes.Get(0)->GetObject<MobilityModel>()->GetPosition().x); // user
-    // include all *deployed* drones
-    for (uint32_t i = 1; i <= g_numDrones; ++i)
-    {
-        if (droneDeployed[i-1])
-            activeXs.push_back(allNodes.Get(i)->GetObject<MobilityModel>()->GetPosition().x);
-    }
-    activeXs.push_back(allNodes.Get(allNodes.GetN()-1)->GetObject<MobilityModel>()->GetPosition().x); // ap
-
-    // total segments after we insert drone = activeXs.size()
-    // we insert drone into the largest gap between consecutive active nodes
-    std::sort(activeXs.begin(), activeXs.end());
-    double bestGap = -1.0; size_t bestIdx = 0;
-    for (size_t j = 0; j + 1 < activeXs.size(); ++j)
-    {
-        double gap = activeXs[j+1] - activeXs[j];
-        if (gap > bestGap) { bestGap = gap; bestIdx = j; }
-    }
-    // place new drone in middle of best gap
-    double targetX = (activeXs[bestIdx] + activeXs[bestIdx+1]) / 2.0;
-
-    // Move the staged drone (node index nextIndex) to targetX and mark deployed
-    Ptr<Node> droneNode = allNodes.Get(nextIndex);
-    Ptr<ConstantVelocityMobilityModel> dm = DynamicCast<ConstantVelocityMobilityModel>(droneNode->GetObject<MobilityModel>());
-    if (!dm) return;
-    Vector oldPos = dm->GetPosition();
-    dm->SetPosition(Vector(targetX, oldPos.y, oldPos.z));
-    dm->SetVelocity(Vector(0.0, 0.0, 0.0)); // stop staged velocity
-    droneDeployed[nextIndex-1] = true;
-    //consume metrics
-    g_txPackets = 0;
-    g_rxPackets = 0;
-    g_avgRtt = 0.0;
-    g_rttSamples = 0;
-    g_sentTimes.clear();
-
-    //update routing table now that drone is active
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
-    NS_LOG_UNCOND("\n[Deploy] Drone node=" << nextIndex << " moved from X=" << oldPos.x << " to target X=" << targetX
-                                       << " due to poor link (loss=" << lossRate << "%, rtt=" << rtt << " ms, rssi=" << directRssi << " dBm)");
-}
-*/
 
 void DeployNextDroneIfNeeded()
 {
@@ -330,14 +256,24 @@ void DeployNextDroneIfNeeded()
     g_rttSamples = 0;
     g_sentTimes.clear();
 
-    Ipv4GlobalRoutingHelper::RecomputeRoutingTables();
+    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+
+NS_LOG_UNCOND("\n--- ROUTING TABLES AFTER DEPLOY ---");
+
+// Create an OutputStreamWrapper for stdout
+Ptr<OutputStreamWrapper> stream = Create<OutputStreamWrapper>(&std::cout);
+
+// Print every node’s routing table
+Ipv4GlobalRoutingHelper g;
+for (uint32_t i = 0; i < allNodes.GetN(); ++i) {
+    g.PrintRoutingTableAt(Seconds(Simulator::Now().GetSeconds()), allNodes.Get(i), stream);
+}
 
     NS_LOG_UNCOND("\n[Deploy] Drone node=" << nextIndex << " moved from X="
                    << oldPos.x << " to target X=" << targetX
                    << " due to poor link (loss=" << lossRate
                    << "%, rtt=" << rtt << " ms, rssi=" << directRssi << " dBm)");
 }
-
 
 // ----- Auto-balance movement -----
 void AutoBalanceDrones()
@@ -348,62 +284,98 @@ void AutoBalanceDrones()
         return;
     }
 
-    // move only those drones that are flagged as deployed (i.e., active)
+    // 1. Move deployed drones based on RSSI steering
     for (uint32_t di = 1; di <= g_numDrones; ++di)
     {
-        if (!droneDeployed[di-1]) continue; // skip staged drones
+        if (!droneDeployed[di-1]) continue;
 
         Ptr<Node> drone = allNodes.Get(di);
-        Ptr<ConstantVelocityMobilityModel> droneMob = DynamicCast<ConstantVelocityMobilityModel>(drone->GetObject<MobilityModel>());
+        Ptr<ConstantVelocityMobilityModel> droneMob =
+            DynamicCast<ConstantVelocityMobilityModel>(drone->GetObject<MobilityModel>());
         if (!droneMob) continue;
 
-        Ptr<MobilityModel> leftMob = allNodes.Get(di-1)->GetObject<MobilityModel>();
+        Ptr<MobilityModel> leftMob  = allNodes.Get(di-1)->GetObject<MobilityModel>();
         Ptr<MobilityModel> rightMob = allNodes.Get(di+1)->GetObject<MobilityModel>();
 
-        double leftDist = droneMob->GetDistanceFrom(leftMob);
+        double leftDist  = droneMob->GetDistanceFrom(leftMob);
         double rightDist = droneMob->GetDistanceFrom(rightMob);
 
-        double leftRssi = rssiCalcFromDistance(leftDist);
+        double leftRssi  = rssiCalcFromDistance(leftDist);
         double rightRssi = rssiCalcFromDistance(rightDist);
-        double diff = leftRssi - rightRssi;
-
+        //double diff      = leftRssi - rightRssi;
+        double diff      = leftDist - rightDist;
         Vector oldPos = droneMob->GetPosition();
         Vector vel(0,0,0);
 
         if (diff > g_rssiMoveThresholdDb)
-        {
-            vel = Vector(g_moveSpeed, 0, 0); // move right
-        }
+            vel = Vector(g_moveSpeed, 0, 0);
         else if (diff < -g_rssiMoveThresholdDb)
-        {
-            vel = Vector(-g_moveSpeed, 0, 0); // move left
-        }
+            vel = Vector(-g_moveSpeed, 0, 0);
         else
-        {
-            vel = Vector(0, 0, 0); // hold
-        }
+            vel = Vector(0, 0, 0);
+
         droneMob->SetVelocity(vel);
 
         double dt = g_balanceInterval.GetSeconds();
         double futureX = oldPos.x + vel.x * dt;
 
+        // respect User/AP boundaries
         double userX = allNodes.Get(0)->GetObject<MobilityModel>()->GetPosition().x;
-        double apX = allNodes.Get(allNodes.GetN()-1)->GetObject<MobilityModel>()->GetPosition().x;
-        double minX = std::min(userX, apX) + 0.1;
-        double maxX = std::max(userX, apX) - 0.1;
+        double apX   = allNodes.Get(allNodes.GetN()-1)->GetObject<MobilityModel>()->GetPosition().x;
+        double minX  = std::min(userX, apX) + 0.1;
+        double maxX  = std::max(userX, apX) - 0.1;
+
         if (futureX < minX) futureX = minX;
         if (futureX > maxX) futureX = maxX;
 
         if (std::fabs(futureX - oldPos.x) > 0.001)
         {
-            NS_LOG_UNCOND("[Move] Drone node=" << di << " moved from X=" << oldPos.x << " to X=" << futureX
-                                              << " (Lrssi=" << leftRssi << " dB, Rrssi=" << rightRssi << " dB)");
+            NS_LOG_UNCOND("[Move] Drone node=" << di
+                           << " moved from X=" << oldPos.x
+                           << " to X=" << futureX
+                           << " (Lrssi=" << leftRssi << " dB, Rrssi=" << rightRssi << " dB)");
         }
+
         droneMob->SetPosition(Vector(futureX, oldPos.y, oldPos.z));
     }
 
+    /*
+    // -------------------------------------------------------------------
+    // 2. NEW FIX: prevent drones from crossing each other (CRITICAL)
+    // -------------------------------------------------------------------
+    for (uint32_t i = 1; i < g_numDrones; ++i)
+    {
+        Ptr<MobilityModel> m1 = allNodes.Get(i)->GetObject<MobilityModel>();
+        Ptr<MobilityModel> m2 = allNodes.Get(i+1)->GetObject<MobilityModel>();
+
+        double x1 = m1->GetPosition().x;
+        double x2 = m2->GetPosition().x;
+
+        if (x1 >= x2)   // crossing detected!
+        {
+            double mid = (x1 + x2) / 2.0;
+
+            // push them slightly apart, tiny epsilon
+            double leftNewX  = mid - 0.01;
+            double rightNewX = mid + 0.01;
+
+            // set positions
+            Vector p1 = m1->GetPosition();
+            Vector p2 = m2->GetPosition();
+
+            m1->SetPosition(Vector(leftNewX,  p1.y, p1.z));
+            m2->SetPosition(Vector(rightNewX, p2.y, p2.z));
+
+            NS_LOG_UNCOND("[OrderFix] Corrected crossing between Drone "
+                          << i << " and Drone " << (i+1)
+                          << " -> newX=(" << leftNewX << ", " << rightNewX << ")");
+        }
+    }
+    */
+    // Re-run again later
     Simulator::Schedule(g_balanceInterval, &AutoBalanceDrones);
 }
+
 
 // ----- Create wifi hop helper -----
 NetDeviceContainer CreateWifiHop(Ptr<Node> staNode, Ptr<Node> apNode, const std::string &ssidName)
@@ -437,13 +409,13 @@ void Monitor(Ptr<WifiPhy> phy, Time interval)
     oss << std::fixed << std::setprecision(2);
     oss << Simulator::Now().GetSeconds() << "s: UserX=" << allNodes.Get(0)->GetObject<MobilityModel>()->GetPosition().x << " m, ";
 
-    double total = 0.0;
+    //double total = 0.0;
     for (uint32_t i = 0; i + 1 < allNodes.GetN(); ++i)
     {
         double dx = allNodes.Get(i)->GetObject<MobilityModel>()->GetPosition().x -
             allNodes.Get(i+1)->GetObject<MobilityModel>()->GetPosition().x;
-        double segDist = std::abs(dx);
-        total += dx;
+        //double segDist = std::abs(dx);
+        //total += dx;
         oss << "seg" << i << "-" << (i+1) << "=" << dx << "m, ";
     }
 
@@ -479,22 +451,30 @@ int main(int argc, char *argv[])
 
     // Build nodes: user (0), drones (1..N), ap (N+1)
     allNodes = NodeContainer();
-    NodeContainer user; user.Create(1); g_user = user.Get(0); allNodes.Add(g_user);
+    NodeContainer user;
+    user.Create(1);
+    g_user = user.Get(0);
+    allNodes.Add(g_user);
 
     droneNodes = NodeContainer();
     if (g_numDrones > 0)
     {
         droneNodes.Create(g_numDrones);
-        for (uint32_t i = 0; i < g_numDrones; ++i) allNodes.Add(droneNodes.Get(i));
+        for (uint32_t i = 0; i < g_numDrones; i++) {
+            allNodes.Add(droneNodes.Get(i));
+        }
     }
 
-    NodeContainer ap; ap.Create(1); g_ap = ap.Get(0); allNodes.Add(g_ap);
+    NodeContainer ap;
+    ap.Create(1);
+    g_ap = ap.Get(0);
+    allNodes.Add(g_ap);
 
     // Mobility: user (moving) and ap (fixed)
     Ptr<ConstantVelocityMobilityModel> userMob = CreateObject<ConstantVelocityMobilityModel>();
     g_user->AggregateObject(userMob);
     userMob->SetPosition(Vector(0.0, 0.0, 0.0));
-    userMob->SetVelocity(Vector(g_userSpeed, 0.0, 0.0)); // moving +X
+    userMob->SetVelocity(Vector(g_userSpeed, 0.0, 0.0)); // moving +g_userSpeed
 
     Ptr<ConstantPositionMobilityModel> apMob = CreateObject<ConstantPositionMobilityModel>();
     g_ap->AggregateObject(apMob);
@@ -504,7 +484,7 @@ int main(int argc, char *argv[])
     // Drone mobility & initial staging positions
     droneDeployed.assign(g_numDrones, false);
 
-    for (uint32_t i = 0; i < g_numDrones; ++i)
+    for (uint32_t i = 0; i < g_numDrones; i++)
     {
         Ptr<ConstantVelocityMobilityModel> dm = CreateObject<ConstantVelocityMobilityModel>();
         droneNodes.Get(i)->AggregateObject(dm);
@@ -582,9 +562,9 @@ int main(int argc, char *argv[])
 
     // remember IPs
     Ipv4Address serverIp = hopIfaces.back().GetAddress(1); // AP address (right side of last hop)
-    Ipv4Address userIp = hopIfaces.front().GetAddress(0);
+    //Ipv4Address userIp = hopIfaces.front().GetAddress(0);
 
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+    Ipv4GlobalRoutingHelper::RecomputeRoutingTables();
 
     // UDP Echo server/client
     uint16_t port = 9;
