@@ -25,6 +25,7 @@ std::map<uint32_t, Time> g_sentTimes;
 double g_lastRtt = 0.0;
 uint64_t g_rttSamples = 0;
 double g_avgRtt = 0.0;
+double g_instantaneousRtt = 0.0;
 
 // Collect packet Tx/Rx stats
 void TxTrace(Ptr<const Packet> p)
@@ -48,11 +49,14 @@ void ClientRxTrace(Ptr<const Packet> p)
   if (it != g_sentTimes.end())
   {
     Time rtt = Simulator::Now() - it->second;
-    g_lastRtt = rtt.GetMilliSeconds();
+    g_lastRtt = rtt.GetSeconds() * 1000.0;
+    g_instantaneousRtt = g_lastRtt;
 
-    // Calculate running average
     g_rttSamples++;
     g_avgRtt = g_avgRtt + (g_lastRtt - g_avgRtt) / g_rttSamples;
+
+    std::cout << "  [Packet #" << g_rttSamples << "] RTT: "
+              << g_instantaneousRtt << "ms, Running Avg: " << g_avgRtt << "ms" << std::endl;
 
     g_sentTimes.erase(it);
   }
@@ -83,7 +87,8 @@ void Monitor(Ptr<WifiPhy> phy, Time interval)
             << "Tx=" << g_txPackets << ", Rx=" << g_rxPackets
             << " (" << lossRate << "% loss), "
             << "RSSI Value= " << rssi_value << ", "
-            << "RTT= " << g_avgRtt << "ms"
+            << "RTT Avg= " << g_avgRtt << "ms, "
+            << "Last RTT= " << g_instantaneousRtt << "ms"
             << std::endl;
 
   // Schedule next check
