@@ -15,6 +15,9 @@
 #include "ns3/log.h"
 #include <map>
 #include "ns3/wifi-module.h"
+#include "ns3/flow-monitor-module.h"
+#include <iostream>
+#include <iomanip>
 
 using namespace ns3;
 
@@ -83,19 +86,19 @@ int main(int argc, char *argv[]) {
   LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_INFO);
 
   Ptr<GridBuildingAllocator>  gridBuildingAllocator;
-  gridBuildingAllocator = CreateObject<GridBuildingAllocator>(); // create a grid of 7 x 13 x 6 buildings
-  gridBuildingAllocator->SetAttribute("GridWidth", UintegerValue(10)); // 5 buildings per row
-  gridBuildingAllocator->SetAttribute("LengthX", DoubleValue(7));
-  gridBuildingAllocator->SetAttribute("LengthY", DoubleValue(13));
-  gridBuildingAllocator->SetAttribute("DeltaX", DoubleValue(3)); // spacing between the buildings
-  gridBuildingAllocator->SetAttribute("DeltaY", DoubleValue(3));
-  gridBuildingAllocator->SetAttribute("Height", DoubleValue(6));
+  gridBuildingAllocator = CreateObject<GridBuildingAllocator>(); // create a grid of 5 x 5 x 10 buildings
+  gridBuildingAllocator->SetAttribute("GridWidth", UintegerValue(100)); // 10 buildings per row
+  gridBuildingAllocator->SetAttribute("LengthX", DoubleValue(5));
+  gridBuildingAllocator->SetAttribute("LengthY", DoubleValue(5));
+  gridBuildingAllocator->SetAttribute("DeltaX", DoubleValue(5)); // spacing between the buildings
+  gridBuildingAllocator->SetAttribute("DeltaY", DoubleValue(10));
+  gridBuildingAllocator->SetAttribute("Height", DoubleValue(10));
   gridBuildingAllocator->SetBuildingAttribute("NRoomsX", UintegerValue(2)); // each building has 2 x 4 rooms
   gridBuildingAllocator->SetBuildingAttribute("NRoomsY", UintegerValue(4));
   gridBuildingAllocator->SetBuildingAttribute("NFloors", UintegerValue(2)); // each building has 2 floors
   gridBuildingAllocator->SetAttribute("MinX", DoubleValue(0));
   gridBuildingAllocator->SetAttribute("MinY", DoubleValue(-20));
-  gridBuildingAllocator->Create(100); // create 100 buildings
+  gridBuildingAllocator->Create(200); // create 200 buildings
 
 
 
@@ -105,24 +108,6 @@ int main(int argc, char *argv[]) {
   user.Create(1);
   g_user = user.Get(0);
   g_ap = baseStation.Get(0);
-
-  // Channel + PHY
-  YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
-  YansWifiPhyHelper phy;
-  phy.SetChannel(channel.Create());
-
-  WifiHelper wifi;
-  wifi.SetStandard(WIFI_STANDARD_80211n);
-  WifiMacHelper mac;
-
-  Ssid ssid("base-ap");
-  mac.SetType("ns3::StaWifiMac",
-              "Ssid", SsidValue(ssid),
-              "ActiveProbing", BooleanValue(false));
-  NetDeviceContainer userDevice = wifi.Install(phy, mac, user);
-
-  mac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
-  NetDeviceContainer apDevice = wifi.Install(phy, mac, baseStation);
 
   // install nodes, make them aware of buildings
   MobilityHelper mobility;
@@ -137,6 +122,30 @@ int main(int argc, char *argv[]) {
 
   BuildingsHelper::Install(baseStation);
   BuildingsHelper::Install(user);
+
+  // Use a building-aware propagation loss model, for example:
+  // YansWifiPhyHelper wifiPhy = YansWifiPhyHelper::Default ();
+  // wifiPhy.Set ("PropagationLossModel", "ns3::BuildingsPropagationLossModel");
+
+  // Channel + PHY
+  YansWifiChannelHelper WiFiChannel = YansWifiChannelHelper::Default();
+  WiFiChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel", "Frequency", DoubleValue(2.4e9), "RooftopLevel", DoubleValue(10.0), "Environment", StringValue("Urban"));
+  Ptr<YansWifiChannel> channel = WiFiChannel.Create();
+  YansWifiPhyHelper phy;
+  phy.SetChannel(channel);
+
+  WifiHelper wifi;
+  wifi.SetStandard(WIFI_STANDARD_80211n);
+  WifiMacHelper mac;
+
+  Ssid ssid("base-ap");
+  mac.SetType("ns3::StaWifiMac",
+              "Ssid", SsidValue(ssid),
+              "ActiveProbing", BooleanValue(false));
+  NetDeviceContainer userDevice = wifi.Install(phy, mac, user);
+
+  mac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
+  NetDeviceContainer apDevice = wifi.Install(phy, mac, baseStation);
 
   InternetStackHelper stack;
   stack.Install(user);
