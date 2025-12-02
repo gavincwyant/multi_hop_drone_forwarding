@@ -85,22 +85,23 @@ int main(int argc, char *argv[]) {
   LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_INFO);
   LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_INFO);
 
-  Ptr<GridBuildingAllocator>  gridBuildingAllocator;
-  gridBuildingAllocator = CreateObject<GridBuildingAllocator>(); // create a grid of 5 x 5 x 10 buildings
-  gridBuildingAllocator->SetAttribute("GridWidth", UintegerValue(100)); // 10 buildings per row
-  gridBuildingAllocator->SetAttribute("LengthX", DoubleValue(5));
-  gridBuildingAllocator->SetAttribute("LengthY", DoubleValue(5));
-  gridBuildingAllocator->SetAttribute("DeltaX", DoubleValue(5)); // spacing between the buildings
-  gridBuildingAllocator->SetAttribute("DeltaY", DoubleValue(10));
-  gridBuildingAllocator->SetAttribute("Height", DoubleValue(10));
-  gridBuildingAllocator->SetBuildingAttribute("NRoomsX", UintegerValue(2)); // each building has 2 x 4 rooms
-  gridBuildingAllocator->SetBuildingAttribute("NRoomsY", UintegerValue(4));
-  gridBuildingAllocator->SetBuildingAttribute("NFloors", UintegerValue(2)); // each building has 2 floors
-  gridBuildingAllocator->SetAttribute("MinX", DoubleValue(0));
-  gridBuildingAllocator->SetAttribute("MinY", DoubleValue(-20));
-  gridBuildingAllocator->Create(200); // create 200 buildings
+  for (int i = 0; i < 5; ++i) {
+        Ptr<Building> b = CreateObject<Building>();
+        b->SetBoundaries(Box(-5.0, -15.0, 20.0 * i, 20.0 * i + 15.0, 0.0, 15.0));
+        b->SetNFloors(5);
+        b->SetBuildingType(Building::Office);
+    }
+    // Row 2 (Right side, X=30 to 40)
+    for (int i = 0; i < 5; ++i) {
+        Ptr<Building> b = CreateObject<Building>();
+        b->SetBoundaries(Box(5.0, 15.0, 20.0 * i, 20.0 * i + 15.0, 0.0, 15.0));
+        b->SetNFloors(5);
+        b->SetBuildingType(Building::Office);
+    }
 
-
+  // Use a building-aware propagation loss model, for example:
+  // YansWifiPhyHelper wifiPhy = YansWifiPhyHelper::Default ();
+  // wifiPhy.Set ("PropagationLossModel", "ns3::BuildingsPropagationLossModel");
 
   NodeContainer baseStation;
   baseStation.Create(1);
@@ -123,22 +124,30 @@ int main(int argc, char *argv[]) {
   BuildingsHelper::Install(baseStation);
   BuildingsHelper::Install(user);
 
-  // Use a building-aware propagation loss model, for example:
-  // YansWifiPhyHelper wifiPhy = YansWifiPhyHelper::Default ();
-  // wifiPhy.Set ("PropagationLossModel", "ns3::BuildingsPropagationLossModel");
-
   // Channel + PHY
   YansWifiChannelHelper WiFiChannel = YansWifiChannelHelper::Default();
-  WiFiChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel", "Frequency", DoubleValue(2.4e9), "RooftopLevel", DoubleValue(10.0), "Environment", StringValue("Urban"));
+  WiFiChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel", 
+    "Frequency", DoubleValue(5.15e9), 
+    "RooftopLevel", DoubleValue(20.0), 
+    "Environment", StringValue("Urban"));
   Ptr<YansWifiChannel> channel = WiFiChannel.Create();
   YansWifiPhyHelper phy;
   phy.SetChannel(channel);
 
   WifiHelper wifi;
   wifi.SetStandard(WIFI_STANDARD_80211n);
+
+  phy.Set("TxPowerStart", DoubleValue(15.0)); 
+  phy.Set("TxPowerEnd", DoubleValue(15.0));
+
+  wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager", 
+                                 "DataMode", StringValue("DsssRate11Mbps"), 
+                                 "ControlMode", StringValue("DsssRate1Mbps"));
+
   WifiMacHelper mac;
 
-  Ssid ssid("base-ap");
+  Ssid ssid = Ssid("UrbanCanyonNet");
+  
   mac.SetType("ns3::StaWifiMac",
               "Ssid", SsidValue(ssid),
               "ActiveProbing", BooleanValue(false));
@@ -146,6 +155,8 @@ int main(int argc, char *argv[]) {
 
   mac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
   NetDeviceContainer apDevice = wifi.Install(phy, mac, baseStation);
+
+  phy.EnablePcapAll("urban-canyon");
 
   InternetStackHelper stack;
   stack.Install(user);
