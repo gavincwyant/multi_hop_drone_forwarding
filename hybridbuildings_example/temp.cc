@@ -14,23 +14,24 @@ int main(int argc, char *argv[])
     LogComponentEnable("UrbanCanyonWifiExample", LOG_LEVEL_INFO);
     
     // --- 1. SETUP BUILDINGS ENVIRONMENT (The Corridor) ---
-    // Define two rows of buildings creating a canyon:
+    // Define two rows of buildings creating a corridor:
     // Row 1 (Left side, X=0 to 10)
+    // Box(double _xMin, double _xMax, double _yMin, double _yMax, double _zMin, double _zMax)
     for (int i = 0; i < 5; ++i) {
         Ptr<Building> b = CreateObject<Building>();
-        b->SetBoundaries(Box(-5.0, -15.0, 20.0 * i, 20.0 * i + 15.0, 0.0, 15.0));
+        b->SetBoundaries(Box(i*10.0, (i + 1)*10.0, -15.0, -5.0, 0.0, 15.0));
         b->SetNFloors(5);
         b->SetBuildingType(Building::Office);
     }
     // Row 2 (Right side, X=30 to 40)
     for (int i = 0; i < 5; ++i) {
         Ptr<Building> b = CreateObject<Building>();
-        b->SetBoundaries(Box(5.0, 15.0, 20.0 * i, 20.0 * i + 15.0, 0.0, 15.0));
+        b->SetBoundaries(Box(i*10.0, (i + 1)*10.0, 5.0, 15.0, 0.0, 15.0));
         b->SetNFloors(5);
         b->SetBuildingType(Building::Office);
     }
-    // Street corridor is between X=10 and X=30. Total length is 100m.
-    // 
+    // Corridor of buildings spans from x = 0 to x = 50
+    // y coordinates are fixed
 
     // --- 2. NODE CREATION AND MOBILITY ---
     NodeContainer apNode, staNode; 

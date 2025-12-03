@@ -80,28 +80,28 @@ void Monitor(Time interval)
 }
 
 int main(int argc, char *argv[]) {
-
   Time::SetResolution(Time::NS);
   LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_INFO);
   LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_INFO);
 
-  for (int i = 0; i < 5; ++i) {
-        Ptr<Building> b = CreateObject<Building>();
-        b->SetBoundaries(Box(-5.0, -15.0, 20.0 * i, 20.0 * i + 15.0, 0.0, 15.0));
-        b->SetNFloors(5);
-        b->SetBuildingType(Building::Office);
-    }
-    // Row 2 (Right side, X=30 to 40)
-    for (int i = 0; i < 5; ++i) {
-        Ptr<Building> b = CreateObject<Building>();
-        b->SetBoundaries(Box(5.0, 15.0, 20.0 * i, 20.0 * i + 15.0, 0.0, 15.0));
-        b->SetNFloors(5);
-        b->SetBuildingType(Building::Office);
-    }
-
-  // Use a building-aware propagation loss model, for example:
-  // YansWifiPhyHelper wifiPhy = YansWifiPhyHelper::Default ();
-  // wifiPhy.Set ("PropagationLossModel", "ns3::BuildingsPropagationLossModel");
+  // Define two rows of buildings creating a corridor:
+  // Row 1 (Left side, X=0 to 10)
+  // Box(double _xMin, double _xMax, double _yMin, double _yMax, double _zMin, double _zMax)
+  for (int i = 0; i < 30; ++i) {
+      Ptr<Building> b = CreateObject<Building>();
+      b->SetBoundaries(Box(i*10.0, (i + 1)*10.0, -210.0, -200.0, 0.0, 15.0));
+      b->SetNFloors(5);
+      b->SetBuildingType(Building::Office);
+  }
+  // Row 2 (Right side, X=30 to 40)
+  for (int i = 0; i < 30; ++i) {
+      Ptr<Building> b = CreateObject<Building>();
+      b->SetBoundaries(Box(i*10.0, (i + 1)*10.0, 200.0, 210.0, 0.0, 15.0));
+      b->SetNFloors(5);
+      b->SetBuildingType(Building::Office);
+  }
+  // Corridor of buildings spans from x = 0 to x = 300
+  // y coordinates are fixed so that buildings are lined up on both sides of the nodes. The corridor is 30 units in width
 
   NodeContainer baseStation;
   baseStation.Create(1);
@@ -110,61 +110,64 @@ int main(int argc, char *argv[]) {
   g_user = user.Get(0);
   g_ap = baseStation.Get(0);
 
-  // install nodes, make them aware of buildings
+  NodeContainer allNodes;
+  allNodes.Add(baseStation);
+  allNodes.Add(user);
+
+  // Mobility
   MobilityHelper mobility;
   mobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
-  mobility.Install(baseStation);
   mobility.Install(user);
-  
-  user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetPosition(Vector(1.0, 0.0, 0.0));
+  mobility.Install(baseStation);
+
+  user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.5));
   user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(Vector(5.0, 0.0, 0.0)); // 5 m/s away from spawn
 
-  baseStation.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.0));
-
-  BuildingsHelper::Install(baseStation);
-  BuildingsHelper::Install(user);
-
-  // Channel + PHY
-  YansWifiChannelHelper WiFiChannel = YansWifiChannelHelper::Default();
-  WiFiChannel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel", 
-    "Frequency", DoubleValue(5.15e9), 
-    "RooftopLevel", DoubleValue(20.0), 
-    "Environment", StringValue("Urban"));
-  Ptr<YansWifiChannel> channel = WiFiChannel.Create();
-  YansWifiPhyHelper phy;
-  phy.SetChannel(channel);
-
-  WifiHelper wifi;
-  wifi.SetStandard(WIFI_STANDARD_80211n);
-
-  phy.Set("TxPowerStart", DoubleValue(15.0)); 
-  phy.Set("TxPowerEnd", DoubleValue(15.0));
-
-  wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager", 
-                                 "DataMode", StringValue("DsssRate11Mbps"), 
-                                 "ControlMode", StringValue("DsssRate1Mbps"));
-
-  WifiMacHelper mac;
-
-  Ssid ssid = Ssid("UrbanCanyonNet");
-  
-  mac.SetType("ns3::StaWifiMac",
-              "Ssid", SsidValue(ssid),
-              "ActiveProbing", BooleanValue(false));
-  NetDeviceContainer userDevice = wifi.Install(phy, mac, user);
-
-  mac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
-  NetDeviceContainer apDevice = wifi.Install(phy, mac, baseStation);
-
-  phy.EnablePcapAll("urban-canyon");
+  baseStation.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.5));
 
   InternetStackHelper stack;
   stack.Install(user);
   stack.Install(baseStation);
 
+  // Make the nodes building aware
+  //BuildingsHelper::Install(user);
+  //BuildingsHelper::Install(baseStation);
+  BuildingsHelper::Install(allNodes);
+
+  // Channel + PHY
+  YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
+  channel.AddPropagationLoss("ns3::HybridBuildingsPropagationLossModel",
+                            "Frequency", DoubleValue(2.4e9),
+                            "RooftopLevel", DoubleValue(15.0),
+                            "Environment", StringValue("Urban"));
+  YansWifiPhyHelper phy;
+  phy.SetChannel(channel.Create());
+
+  phy.Set("TxPowerStart", DoubleValue(15.0));
+  phy.Set("TxPowerEnd", DoubleValue(15.0));
+
+  WifiHelper wifi;
+  wifi.SetStandard(WIFI_STANDARD_80211n);
+
+  wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager",
+                              "DataMode", StringValue("DsssRate11Mbps"),
+                              "ControlMode", StringValue("DsssRate1Mbps"));
+
+  WifiMacHelper mac;
+
+  Ssid ssid = Ssid("UrbanCanyonNet");
+  mac.SetType("ns3::StaWifiMac",
+              "Ssid", SsidValue(ssid));
+  NetDeviceContainer userDevice = wifi.Install(phy, mac, user);
+
+  mac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
+  NetDeviceContainer apDevice = wifi.Install(phy, mac, baseStation);
+
   Ipv4AddressHelper address;
   address.SetBase("10.1.1.0", "255.255.255.0");
   Ipv4InterfaceContainer interfaces = address.Assign(NetDeviceContainer(userDevice, apDevice));
+
+  phy.EnablePcapAll("urban-canyon");    
 
   // UDP Echo
   uint16_t port = 9;
@@ -188,17 +191,15 @@ int main(int argc, char *argv[]) {
 
   clientApp->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
   serverApp->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
-  clientApp->TraceConnectWithoutContext("Rx", MakeCallback(&ClientRxTrace));
 
   // Start periodic monitoring
   Simulator::Schedule(Seconds(2.0), &Monitor, Seconds(2.0));
 
-  phy.EnablePcapAll("BuildingsExample");
+  phy.EnablePcapAll("drone_wifi_simulation");
 
   Simulator::Stop(Seconds(60.0));
   Simulator::Run();
   Simulator::Destroy();
-  return 0;
-
+  
   return 0;
 }
