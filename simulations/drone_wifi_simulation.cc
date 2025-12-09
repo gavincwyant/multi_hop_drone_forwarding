@@ -6,6 +6,14 @@
 #include "ns3/applications-module.h"
 #include "ns3/ssid.h"
 #include "ns3/config-store-module.h"
+#include "ns3/simulator.h"
+#include "ns3/building.h"
+#include "ns3/building-container.h"
+#include "ns3/buildings-module.h"
+#include "ns3/hybrid-buildings-propagation-loss-model.h"
+#include "ns3/mobility-building-info.h"
+#include "ns3/log.h"
+#include <map>
 
 using namespace ns3;
 
@@ -17,12 +25,52 @@ uint64_t g_rxPackets = 0;
 Ptr<Node> g_user;
 Ptr<Node> g_ap;
 
+// RTT tracking
+std::map<uint32_t, Time> g_sentTimes;
+double g_lastRtt = 0.0;
+uint64_t g_rttSamples = 0;
+double g_avgRtt = 0.0;
+
 // Collect packet Tx/Rx stats
-void TxTrace(Ptr<const Packet> p) { g_txPackets++; }
-void RxTrace(Ptr<const Packet> p, const Address &) { g_rxPackets++; }
+void TxTrace(Ptr<const Packet> p)
+{
+  g_txPackets++;
+  // Store send time for RTT calculation
+  g_sentTimes[p->GetUid()] = Simulator::Now();
+}
+
+void RxTrace(Ptr<const Packet> p, const Address &)
+{
+  g_rxPackets++;
+}
+
+// Client receives echo response
+void ClientRxTrace(Ptr<const Packet> p)
+{
+  uint32_t uid = p->GetUid();
+  auto it = g_sentTimes.find(uid);
+
+  if (it != g_sentTimes.end())
+  {
+    Time rtt = Simulator::Now() - it->second;
+    g_lastRtt = rtt.GetMilliSeconds();
+
+    // Calculate running average
+    g_rttSamples++;
+    g_avgRtt = g_avgRtt + (g_lastRtt - g_avgRtt) / g_rttSamples;
+
+    g_sentTimes.erase(it);
+  }
+}
+
+// Monitor definition
+void Monitor(Ptr<WifiPhy>, Time);
+
+// rssiCalc definition
+double rssiCalc(Ptr<WifiPhy>, Ptr<MobilityModel>, Ptr<MobilityModel>, double);
 
 // Periodically print network stats
-void Monitor(Time interval)
+void Monitor(Ptr<WifiPhy> phy, Time interval)
 {
   Ptr<MobilityModel> userMob = g_user->GetObject<MobilityModel>();
   Ptr<MobilityModel> apMob = g_ap->GetObject<MobilityModel>();
@@ -32,15 +80,20 @@ void Monitor(Time interval)
   if (g_txPackets > 0)
     lossRate = 100.0 * (1.0 - (double)g_rxPackets / g_txPackets);
 
+  double rssi_value = rssiCalc(phy, userMob, apMob, distance);
+
   // Print timestamp, distance, and loss
   std::cout << Simulator::Now().GetSeconds() << "s: "
             << "Distance=" << distance << "m, "
             << "Tx=" << g_txPackets << ", Rx=" << g_rxPackets
-            << " (" << lossRate << "% loss)"
+            << " (" << lossRate << "% loss), "
+            << "RSSI Value= " << rssi_value << ", "
+            << "RTT= " << g_avgRtt << "ms"
+//            << "Initial Tx Power= " << phy->GetTxPowerStart() << " dBm"
             << std::endl;
 
   // Schedule next check
-  Simulator::Schedule(interval, &Monitor, interval);
+  Simulator::Schedule(interval, &Monitor, phy, interval);
 }
 
 int main(int argc, char *argv[])
@@ -80,10 +133,30 @@ int main(int argc, char *argv[])
   mobility.Install(user);
   mobility.Install(baseStation);
 
-  user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.0));
+  user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetPosition(Vector(1.0, 0.0, 0.0));
   user.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(Vector(5.0, 0.0, 0.0)); // 5 m/s away from spawn
 
   baseStation.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.0));
+
+  // add buildings here
+  // hybrid propagation loss model, waiting for feedback from Gavin our networks guru
+
+
+
+  /* add one building
+  BuildingContainer buildings;
+  Ptr<Building> building1 = CreateObject<Building>();
+  building1->SetBoundaries(Box(10.0, 20.0, 0.0, 30.0, 10.0, 30.0));  
+  building1->SetBuildingType(Building::Residential);
+  building1->SetNFloors(2);
+  building1->SetNRoomsX(2); 
+  building1->SetNRoomsY(2);
+  building1->SetExtWallsType(Building::ExtWallsType_t::ConcreteWithWindows);
+
+  buildings.Add(building1);
+
+  BuildingsHelper::Install(user);
+  */
 
   InternetStackHelper stack;
   stack.Install(user);
@@ -115,9 +188,12 @@ int main(int argc, char *argv[])
 
   clientApp->TraceConnectWithoutContext("Tx", MakeCallback(&TxTrace));
   serverApp->TraceConnectWithoutContext("Rx", MakeCallback(&RxTrace));
+  clientApp->TraceConnectWithoutContext("Rx", MakeCallback(&ClientRxTrace));
 
+  Ptr<WifiNetDevice> wifiDevice = DynamicCast<WifiNetDevice>(apDevice.Get(0));
+  Ptr<WifiPhy> phyPtr = wifiDevice->GetPhy();
   // Start periodic monitoring
-  Simulator::Schedule(Seconds(2.0), &Monitor, Seconds(2.0));
+  Simulator::Schedule(Seconds(2.0), &Monitor, phyPtr, Seconds(2.0));
 
   phy.EnablePcapAll("drone_wifi_simulation");
 
@@ -125,4 +201,33 @@ int main(int argc, char *argv[])
   Simulator::Run();
   Simulator::Destroy();
   return 0;
+}
+
+double rssiCalc(Ptr<WifiPhy> phy, Ptr<MobilityModel> mobility1, Ptr<MobilityModel> mobility2, double distance)
+{
+  // RSSI = P - 10a*log(d/d0) + Xg
+
+  double Px = 0.05; // in dBm
+
+  double pathLossExponent = 3.0; // typical urban area
+
+  double originDistance = 1.0; // reference distance in meters
+
+  // in dB, random value between 5 and 9 dB
+  Ptr<UniformRandomVariable> rand = CreateObject<UniformRandomVariable>();
+
+  double minNoise = 5.0; // in dB
+  double maxNoise = 9.0;
+
+  rand->SetAttribute("Min", DoubleValue(minNoise));
+  rand->SetAttribute("Max", DoubleValue(maxNoise));
+
+  double noise = rand->GetValue(); // in dB
+
+  double rssi = Px - 10 * pathLossExponent * std::log10(distance / originDistance) - noise;
+
+  //NS_LOG_UNCOND("Time: " << Simulator::Now().GetSeconds() << "s, Distance: " << distance << "m, RSSI: " << rssi << " dBm" << std::endl);
+
+  return rssi;
+
 }
