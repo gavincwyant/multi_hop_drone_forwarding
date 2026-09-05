@@ -4,6 +4,10 @@ An ns-3 simulation of drone-assisted relay deployment in a degrading wireless li
 
 **Advanced Systems Software group project — Luke Haidze, Vlad Bordia, Gavin Wyant**
 
+Five drones held the link out to 295 m across 6 hops at 94% packet delivery,
+where the unaided link failed past 50 m. The deployment trigger has to be a
+*windowed* loss rate — a cumulative one never crosses the threshold at all.
+
 ## The idea
 
 A single user travels away from a fixed access point at constant velocity while
@@ -43,39 +47,6 @@ adding hops is a matter of raising `--maxRelays`.
 
 A deployment cooldown (`--cooldown`) prevents the trigger from firing repeatedly
 against stale measurements while AODV is still converging on the new route.
-
-## Running it
-
-This repo does not vendor ns-3. You need a local ns-3 checkout, with this repo
-beside it:
-
-```text
-.
-├── multi_hop_drone_forwarding
-└── ns-3-dev
-```
-
-```sh
-./run_sim.sh                                    # defaults
-./run_sim.sh --maxRelays=5 --lossThreshold=15   # pass ns-3 args through
-./run_sim.sh --csv=results.csv                  # per-tick metrics to CSV
-```
-
-### Options
-
-| Flag | Default | Meaning |
-| --- | --- | --- |
-| `--simTime` | 200 | Simulation duration (s) |
-| `--userSpeed` | 5 | User velocity along +x (m/s) |
-| `--lossThreshold` | 20 | Windowed loss % that triggers a deployment |
-| `--maxRelays` | 3 | Relay drones available |
-| `--monitorInterval` | 1 | Seconds between measurements |
-| `--cooldown` | 10 | Minimum seconds between deployments |
-| `--placementGamma` | 1.0 | Placement exponent: 1 = even, >1 toward base, <1 toward user |
-| `--csv` | *(off)* | Write per-tick metrics to this path |
-| `--pcap` | off | Enable pcap capture |
-
-CSV columns: `time_s,distance_m,window_loss_pct,cumulative_loss_pct,active_relays`.
 
 ## Results
 
@@ -169,6 +140,39 @@ binding constraint is the number of drones available, not where they are placed 
 past the ceiling, better placement buys nothing.
 
 Raise `--maxRelays` to push the ceiling out; the ~50 m per hop relationship holds.
+
+## Running it
+
+This repo does not vendor ns-3. You need a local ns-3 checkout, with this repo
+beside it:
+
+```text
+.
+├── multi_hop_drone_forwarding
+└── ns-3-dev
+```
+
+```sh
+./run_sim.sh                                    # defaults
+./run_sim.sh --maxRelays=5 --lossThreshold=15   # pass ns-3 args through
+./run_sim.sh --csv=results.csv                  # per-tick metrics to CSV
+```
+
+### Options
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--simTime` | 200 | Simulation duration (s) |
+| `--userSpeed` | 5 | User velocity along +x (m/s) |
+| `--lossThreshold` | 20 | Windowed loss % that triggers a deployment |
+| `--maxRelays` | 3 | Relay drones available |
+| `--monitorInterval` | 1 | Seconds between measurements |
+| `--cooldown` | 10 | Minimum seconds between deployments |
+| `--placementGamma` | 1.0 | Placement exponent: 1 = even, >1 toward base, <1 toward user |
+| `--csv` | *(off)* | Write per-tick metrics to this path |
+| `--pcap` | off | Enable pcap capture |
+
+CSV columns: `time_s,distance_m,window_loss_pct,cumulative_loss_pct,active_relays`.
 
 ## Known limitations
 
